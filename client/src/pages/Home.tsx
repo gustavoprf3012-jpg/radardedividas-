@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { startLogin } from "@/const";
 import {
   ArrowRight,
   BadgeCheck,
@@ -26,6 +28,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useLocation } from "wouter";
 
 const faqs = [
   {
@@ -81,6 +84,8 @@ function scrollToSection(id: string) {
 }
 
 export default function Home() {
+  const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [faqOpen, setFaqOpen] = useState<number | null>(0);
   const [income, setIncome] = useState("4200");
@@ -110,7 +115,7 @@ export default function Home() {
             <button className="transition-colors hover:text-white" onClick={() => scrollToSection("como-funciona")}>Como funciona</button>
             <button className="transition-colors hover:text-white" onClick={() => scrollToSection("bonus")}>O que você recebe</button>
             <button className="transition-colors hover:text-white" onClick={() => scrollToSection("faq")}>Dúvidas</button>
-            <button className="rounded-full border border-white/20 px-4 py-2 text-white transition-all hover:border-[#ff957e] hover:bg-white/10" onClick={() => scrollToSection("oferta")}>Ver oferta</button>
+            <button className="rounded-full border border-white/20 px-4 py-2 text-white transition-all hover:border-[#ff957e] hover:bg-white/10" onClick={() => user ? setLocation("/app") : startLogin()}>{user ? "Abrir app" : "Entrar"}</button>
           </nav>
 
           <button className="rounded-lg p-2 text-white md:hidden" onClick={() => setMenuOpen((open) => !open)} aria-label="Abrir menu">
@@ -123,7 +128,7 @@ export default function Home() {
               <button className="py-2 text-left" onClick={() => { scrollToSection("como-funciona"); setMenuOpen(false); }}>Como funciona</button>
               <button className="py-2 text-left" onClick={() => { scrollToSection("bonus"); setMenuOpen(false); }}>O que você recebe</button>
               <button className="py-2 text-left" onClick={() => { scrollToSection("faq"); setMenuOpen(false); }}>Dúvidas</button>
-              <button className="rounded-lg bg-[#ff7a61] px-4 py-3 text-left font-extrabold text-[#102d3c]" onClick={() => { scrollToSection("oferta"); setMenuOpen(false); }}>Ver oferta</button>
+              <button className="rounded-lg bg-[#ff7a61] px-4 py-3 text-left font-extrabold text-[#102d3c]" onClick={() => { user ? setLocation("/app") : startLogin(); setMenuOpen(false); }}>{user ? "Abrir app" : "Entrar"}</button>
             </div>
           </div>
         )}
