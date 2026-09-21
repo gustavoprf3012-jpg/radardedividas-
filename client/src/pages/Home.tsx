@@ -65,10 +65,18 @@ const faqs = [
   },
 ];
 
-const debts = [
-  { label: "Cartão principal", value: 2470, pressure: 86, color: "coral" },
-  { label: "Empréstimo pessoal", value: 5100, pressure: 62, color: "blue" },
-  { label: "Conta atrasada", value: 860, pressure: 43, color: "slate" },
+type DemoDebt = {
+  id: string;
+  label: string;
+  value: string;
+  pressure: number;
+  color: "coral" | "blue" | "slate";
+};
+
+const initialDemoDebts: DemoDebt[] = [
+  { id: "card", label: "Cartão principal", value: "2470", pressure: 86, color: "coral" },
+  { id: "loan", label: "Empréstimo pessoal", value: "5100", pressure: 62, color: "blue" },
+  { id: "late", label: "Conta atrasada", value: "860", pressure: 43, color: "slate" },
 ];
 
 function formatBRL(value: number) {
@@ -77,6 +85,10 @@ function formatBRL(value: number) {
     currency: "BRL",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function numericValue(value: string) {
+  return Number(value.replace(/\D/g, "")) || 0;
 }
 
 function scrollToSection(id: string) {
@@ -90,12 +102,32 @@ export default function Home() {
   const [faqOpen, setFaqOpen] = useState<number | null>(0);
   const [income, setIncome] = useState("4200");
   const [cash, setCash] = useState("780");
+  const [demoDebts, setDemoDebts] = useState<DemoDebt[]>(initialDemoDebts);
   const [showResult, setShowResult] = useState(false);
 
-  const totalDebt = useMemo(() => debts.reduce((sum, debt) => sum + debt.value, 0), []);
-  const cashNumber = Number(cash.replace(/\D/g, "")) || 0;
-  const incomeNumber = Number(income.replace(/\D/g, "")) || 0;
+  const totalDebt = useMemo(() => demoDebts.reduce((sum, debt) => sum + numericValue(debt.value), 0), [demoDebts]);
+  const rankedDebts = useMemo(() => [...demoDebts].sort((a, b) => b.pressure - a.pressure), [demoDebts]);
+  const topDebt = rankedDebts[0] ?? initialDemoDebts[0];
+  const cashNumber = numericValue(cash);
+  const incomeNumber = numericValue(income);
   const available = Math.max(cashNumber - Math.round(incomeNumber * 0.08), 0);
+
+  function updateDemoDebt(id: string, field: "label" | "value" | "pressure", value: string | number) {
+    setDemoDebts((current) => current.map((debt) => debt.id === id ? { ...debt, [field]: value } : debt));
+    setShowResult(false);
+  }
+
+  function addDemoDebt() {
+    if (demoDebts.length >= 6) return;
+    setDemoDebts((current) => [...current, { id: `debt-${Date.now()}`, label: "Nova dívida", value: "0", pressure: 30, color: "slate" }]);
+    setShowResult(false);
+  }
+
+  function removeDemoDebt(id: string) {
+    if (demoDebts.length <= 1) return;
+    setDemoDebts((current) => current.filter((debt) => debt.id !== id));
+    setShowResult(false);
+  }
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#f8f5ef] text-[#102d3c] selection:bg-[#ff7a61]/20">
@@ -159,7 +191,7 @@ export default function Home() {
               <div className="relative overflow-hidden rounded-[28px] border border-white/15 bg-[#f7f4ee] p-3 text-[#102d3c] shadow-[0_35px_90px_rgba(0,0,0,.28)] sm:p-4">
                 <div className="rounded-[21px] bg-white p-5 sm:p-7">
                   <div className="mb-6 flex items-start justify-between gap-3">
-                    <div><p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#ff7a61]">Seu diagnóstico</p><h2 className="mt-1 font-display text-2xl font-extrabold tracking-[-0.05em]">Pare de decidir no susto.</h2></div>
+                    <div><p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#ff7a61]">Teste agora</p><h2 className="mt-1 font-display text-2xl font-extrabold tracking-[-0.05em]">Veja sua primeira prioridade.</h2><p className="mt-2 text-xs leading-5 text-[#6b8084]">Digite seus números, edite as contas e veja o resultado.</p></div>
                     <span className="grid size-10 place-items-center rounded-xl bg-[#e9f2f0] text-[#176179]"><BarChart3 size={20} /></span>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -169,11 +201,12 @@ export default function Home() {
                   <div className="mt-6 rounded-2xl bg-[#f5f7f4] p-4">
                     <div className="mb-3 flex items-center justify-between"><span className="text-xs font-extrabold uppercase tracking-[0.12em] text-[#59717a]">Pressão das contas</span><span className="rounded-full bg-[#ffebe6] px-2 py-1 text-[10px] font-extrabold text-[#db5c43]">AGORA</span></div>
                     <div className="space-y-4">
-                      {debts.map((debt) => <DebtRow key={debt.label} {...debt} />)}
+                      {demoDebts.map((debt) => <DemoDebtRow key={debt.id} debt={debt} onChange={updateDemoDebt} onRemove={removeDemoDebt} />)}
                     </div>
+                    <button className="mt-4 text-xs font-extrabold text-[#227188] disabled:opacity-40" onClick={addDemoDebt} disabled={demoDebts.length >= 6}>+ Adicionar outra dívida</button>
                   </div>
-                  <div className="mt-5 flex items-center justify-between border-t border-[#e7edeb] pt-5"><div><span className="block text-xs font-semibold text-[#7b8c91]">Total informado</span><strong className="font-display text-2xl tracking-[-0.04em]">{formatBRL(totalDebt)}</strong></div><Button className="h-11 rounded-xl bg-[#102d3c] px-4 text-xs font-extrabold text-white hover:bg-[#194a5e]" onClick={() => setShowResult(true)}>{showResult ? "Diagnóstico pronto" : "Rodar diagnóstico"} <Zap size={14} className="ml-2" /></Button></div>
-                  {showResult && <div className="mt-4 rounded-xl border border-[#bfe4d7] bg-[#eaf8f3] p-3 text-xs font-bold leading-5 text-[#236c57]">Sua primeira frente: <span className="text-[#102d3c]">Cartão principal.</span> Com {formatBRL(available)} disponíveis no mês, evite espalhar o dinheiro em todas as contas. Abra o plano de 7 dias.</div>}
+                  <div className="mt-5 flex items-center justify-between border-t border-[#e7edeb] pt-5"><div><span className="block text-xs font-semibold text-[#7b8c91]">Total informado</span><strong className="font-display text-2xl tracking-[-0.04em]">{formatBRL(totalDebt)}</strong></div><Button className="h-11 rounded-xl bg-[#102d3c] px-4 text-xs font-extrabold text-white hover:bg-[#194a5e]" onClick={() => setShowResult(true)}>{showResult ? "Prioridade calculada" : "Ver minha prioridade"} <Zap size={14} className="ml-2" /></Button></div>
+                  {showResult && <div className="mt-4 rounded-xl border border-[#bfe4d7] bg-[#eaf8f3] p-3 text-xs font-bold leading-5 text-[#236c57]">Sua primeira frente: <span className="text-[#102d3c]">{topDebt.label}</span>, com {topDebt.pressure}% de pressão declarada. Com {formatBRL(available)} disponíveis no mês, evite espalhar o dinheiro em todas as contas.<button className="mt-2 block font-extrabold text-[#102d3c] underline" onClick={() => user ? setLocation("/app/novo") : startLogin()}>{user ? "Continuar no app e salvar" : "Entrar para salvar meu diagnóstico"} <ArrowRight className="ml-1 inline" size={13} /></button></div>}
                 </div>
                 <div className="flex items-center justify-between px-3 py-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[#6e8084]"><span className="flex items-center gap-1.5"><CircleDollarSign size={13} /> Feito para a vida real</span><span>Dados aproximados funcionam</span></div>
               </div>
@@ -217,6 +250,18 @@ export default function Home() {
 
 function RadarIcon() {
   return <span className="relative block size-5"><span className="absolute inset-0 rounded-full border-[2px] border-current" /><span className="absolute left-1/2 top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" /><span className="absolute left-1/2 top-1/2 h-[2px] w-3 origin-left -rotate-45 bg-current" /></span>;
+}
+
+function DemoDebtRow({
+  debt,
+  onChange,
+  onRemove,
+}: {
+  debt: DemoDebt;
+  onChange: (id: string, field: "label" | "value" | "pressure", value: string | number) => void;
+  onRemove: (id: string) => void;
+}) {
+  return <div className="rounded-xl border border-[#e1e9e7] bg-white/70 p-3"><div className="flex items-center gap-2"><Input value={debt.label} onChange={(event) => onChange(debt.id, "label", event.target.value)} className="h-9 flex-1 rounded-lg border-[#dce6e5] px-3 text-xs font-bold" aria-label="Nome da dívida" /><button className="px-1 text-xs font-bold text-[#9aacab] hover:text-[#df684f] disabled:opacity-40" onClick={() => onRemove(debt.id)} disabled={false} aria-label={`Remover ${debt.label}`}>×</button></div><div className="mt-3 flex items-center gap-3"><label className="relative block w-[112px]"><span className="absolute left-2.5 top-2 text-[10px] font-bold text-[#97a6aa]">R$</span><Input value={debt.value} onChange={(event) => onChange(debt.id, "value", event.target.value)} className="h-8 rounded-lg border-[#dce6e5] pl-7 text-xs font-bold" inputMode="numeric" aria-label={`Saldo de ${debt.label}`} /></label><label className="flex flex-1 items-center gap-2"><input className="h-2 flex-1 accent-[#ff7a61]" type="range" min="0" max="100" value={debt.pressure} onChange={(event) => onChange(debt.id, "pressure", Number(event.target.value))} aria-label={`Pressão de ${debt.label}`} /><span className="w-9 text-right text-[10px] font-extrabold text-[#df684f]">{debt.pressure}%</span></label></div></div>;
 }
 
 function DebtRow({ label, value, pressure, color }: { label: string; value: number; pressure: number; color: string }) {
