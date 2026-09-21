@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import {
@@ -104,6 +104,7 @@ export default function Home() {
   const [cash, setCash] = useState("780");
   const [demoDebts, setDemoDebts] = useState<DemoDebt[]>(initialDemoDebts);
   const [showResult, setShowResult] = useState(false);
+  const resultRef = useRef<HTMLDivElement>(null);
 
   const totalDebt = useMemo(() => demoDebts.reduce((sum, debt) => sum + numericValue(debt.value), 0), [demoDebts]);
   const rankedDebts = useMemo(() => [...demoDebts].sort((a, b) => b.pressure - a.pressure), [demoDebts]);
@@ -111,6 +112,16 @@ export default function Home() {
   const cashNumber = numericValue(cash);
   const incomeNumber = numericValue(income);
   const available = Math.max(cashNumber - Math.round(incomeNumber * 0.08), 0);
+
+  useEffect(() => {
+    if (!showResult) return;
+    const timer = window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+    return () => window.clearTimeout(timer);
+  }, [showResult]);
+
+  function runDemoDiagnosis() {
+    setShowResult(true);
+  }
 
   function updateDemoDebt(id: string, field: "label" | "value" | "pressure", value: string | number) {
     setDemoDebts((current) => current.map((debt) => debt.id === id ? { ...debt, [field]: value } : debt));
@@ -205,8 +216,8 @@ export default function Home() {
                     </div>
                     <button className="mt-4 text-xs font-extrabold text-[#227188] disabled:opacity-40" onClick={addDemoDebt} disabled={demoDebts.length >= 6}>+ Adicionar outra dívida</button>
                   </div>
-                  <div className="mt-5 flex items-center justify-between border-t border-[#e7edeb] pt-5"><div><span className="block text-xs font-semibold text-[#7b8c91]">Total informado</span><strong className="font-display text-2xl tracking-[-0.04em]">{formatBRL(totalDebt)}</strong></div><Button className="h-11 rounded-xl bg-[#102d3c] px-4 text-xs font-extrabold text-white hover:bg-[#194a5e]" onClick={() => setShowResult(true)}>{showResult ? "Prioridade calculada" : "Ver minha prioridade"} <Zap size={14} className="ml-2" /></Button></div>
-                  {showResult && <div className="mt-4 rounded-xl border border-[#bfe4d7] bg-[#eaf8f3] p-3 text-xs font-bold leading-5 text-[#236c57]"><p>Sua primeira frente: <span className="text-[#102d3c]">{topDebt.label}</span>, com {topDebt.pressure}% de pressão declarada. Com {formatBRL(available)} disponíveis no mês, evite espalhar o dinheiro em todas as contas.</p><div className="mt-3 border-t border-[#bfe4d7] pt-3"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#227188]">Plano inicial</p><ol className="mt-2 space-y-1.5 text-[11px] leading-4 text-[#236c57]"><li><strong className="text-[#102d3c]">Hoje:</strong> separe o valor disponível e não pague todas as contas ao mesmo tempo.</li><li><strong className="text-[#102d3c]">Próximas 24h:</strong> confirme juros, vencimento e valor final de {topDebt.label}.</li><li><strong className="text-[#102d3c]">Em 7 dias:</strong> atualize os números e compare o que mudou.</li></ol></div><button className="mt-3 block font-extrabold text-[#102d3c] underline" onClick={() => user ? setLocation("/app/novo") : startLogin()}>{user ? "Continuar no app e salvar" : "Entrar para salvar meu diagnóstico"} <ArrowRight className="ml-1 inline" size={13} /></button></div>}
+                  <div className="mt-5 flex items-center justify-between border-t border-[#e7edeb] pt-5"><div><span className="block text-xs font-semibold text-[#7b8c91]">Total informado</span><strong className="font-display text-2xl tracking-[-0.04em]">{formatBRL(totalDebt)}</strong></div><Button className="h-11 rounded-xl bg-[#102d3c] px-4 text-xs font-extrabold text-white hover:bg-[#194a5e]" onClick={runDemoDiagnosis}>{showResult ? "Atualizar resultado" : "Calcular minha prioridade"} <Zap size={14} className="ml-2" /></Button></div>
+                  {showResult && <div ref={resultRef} className="mt-4 scroll-mt-24 rounded-xl border-2 border-[#8fd0bb] bg-[#eaf8f3] p-4 text-xs font-bold leading-5 text-[#236c57]"><p className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#227188]">Resultado encontrado</p><p>Sua primeira frente: <span className="text-[#102d3c]">{topDebt.label}</span>, com {topDebt.pressure}% de pressão declarada. Com {formatBRL(available)} disponíveis no mês, evite espalhar o dinheiro em todas as contas.</p><div className="mt-3 border-t border-[#bfe4d7] pt-3"><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#227188]">Plano inicial de 7 dias</p><ol className="mt-2 space-y-1.5 text-[11px] leading-4 text-[#236c57]"><li><strong className="text-[#102d3c]">Hoje:</strong> separe o valor disponível e não pague todas as contas ao mesmo tempo.</li><li><strong className="text-[#102d3c]">Próximas 24h:</strong> confirme juros, vencimento e valor final de {topDebt.label}.</li><li><strong className="text-[#102d3c]">Em 7 dias:</strong> atualize os números e compare o que mudou.</li></ol></div><button className="mt-3 block font-extrabold text-[#102d3c] underline" onClick={() => user ? setLocation("/app/novo") : startLogin()}>{user ? "Continuar no app e salvar" : "Entrar para salvar meu diagnóstico"} <ArrowRight className="ml-1 inline" size={13} /></button></div>}
                 </div>
                 <div className="flex items-center justify-between px-3 py-3 text-[10px] font-bold uppercase tracking-[0.12em] text-[#6e8084]"><span className="flex items-center gap-1.5"><CircleDollarSign size={13} /> Feito para a vida real</span><span>Dados aproximados funcionam</span></div>
               </div>
