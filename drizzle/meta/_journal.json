@@ -8,6 +8,20 @@
       "when": 1789913427303,
       "tag": "0000_peaceful_the_call",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1790667135786,
+      "tag": "0001_new_zodiak",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1790667165261,
+      "tag": "0002_dashing_namorita",
+      "breakpoints": true
     }
   ]
 }

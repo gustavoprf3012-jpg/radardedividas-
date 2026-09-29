@@ -21,6 +21,7 @@ export const diagnoses = mysqlTable("diagnoses", {
   totalDebtCents: int("totalDebtCents").notNull(),
   topPriority: varchar("topPriority", { length: 160 }).notNull(),
   planJson: text("planJson").notNull(),
+  completedPlanJson: text("completedPlanJson"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -30,6 +31,9 @@ export const diagnosisDebts = mysqlTable("diagnosisDebts", {
   label: varchar("label", { length: 160 }).notNull(),
   balanceCents: int("balanceCents").notNull(),
   pressure: int("pressure").notNull(),
+  dueDay: int("dueDay"),
+  interestRateBps: int("interestRateBps"),
+  minimumPaymentCents: int("minimumPaymentCents"),
   position: int("position").notNull(),
 });
 

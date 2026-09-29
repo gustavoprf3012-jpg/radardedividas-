@@ -1,55 +1,23 @@
 import { useMemo, useState } from "react";
-import {
-  ArrowRight,
-  BarChart3,
-  CalendarClock,
-  Check,
-  ChevronRight,
-  CircleDollarSign,
-  ClipboardCheck,
-  Clock3,
-  CreditCard,
-  FileText,
-  Plus,
-  RotateCcw,
-  ShieldCheck,
-  Sparkles,
-  Target,
-  Trash2,
-  WalletCards,
-} from "lucide-react";
+import { ArrowRight, BarChart3, CalendarClock, Check, ClipboardCheck, CircleDollarSign, Clock3, FileText, Plus, RotateCcw, ShieldCheck, Sparkles, Target, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
-import {
-  calculateAvailableCents,
-  calculateTotalDebtCents,
-  rankDebts,
-} from "@shared/diagnosis";
+import { calculateAvailableCents, calculateTotalDebtCents, rankDebts } from "@shared/diagnosis";
 
 const fallbackDebts = [
-  { label: "Cartão principal", balance: "2470", pressure: 86 },
-  { label: "Empréstimo pessoal", balance: "5100", pressure: 62 },
-  { label: "Conta atrasada", balance: "860", pressure: 43 },
+  { label: "Cartão principal", balance: "2470", pressure: 86, dueDay: "", interestRate: "", minimumPayment: "" },
+  { label: "Empréstimo pessoal", balance: "5100", pressure: 62, dueDay: "", interestRate: "", minimumPayment: "" },
+  { label: "Conta atrasada", balance: "860", pressure: 43, dueDay: "", interestRate: "", minimumPayment: "" },
 ];
 
-function toCents(value: string) {
-  return Math.max(Number(value.replace(/\D/g, "")) || 0, 0) * 100;
-}
-
-function money(value: number) {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(value / 100);
-}
-
-function dateLabel(value: string | Date | null | undefined) {
-  if (!value) return "Agora";
-  return new Date(value).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
-}
-
-type DebtDraft = { label: string; balance: string; pressure: number };
-
+type DebtDraft = { label: string; balance: string; pressure: number; dueDay: string; interestRate: string; minimumPayment: string };
 type PlanItem = { title: string; text: string; tone: string };
+
+function toCents(value: string) { return Math.max(Number(value.replace(/\D/g, "")) || 0, 0) * 100; }
+function money(value: number) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(value / 100); }
+function dateLabel(value: string | Date | null | undefined) { return value ? new Date(value).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "Agora"; }
 
 export default function AppDashboard() {
   const [location, setLocation] = useLocation();
@@ -58,33 +26,16 @@ export default function AppDashboard() {
   const [debts, setDebts] = useState<DebtDraft[]>(fallbackDebts);
   const [savedResult, setSavedResult] = useState<any>(null);
   const isNew = location === "/app/novo";
-  const diagnoses = trpc.diagnosis.list.useQuery(undefined, { enabled: !isNew || isNew });
+  const diagnoses = trpc.diagnosis.list.useQuery();
   const utils = trpc.useUtils();
-  const createDiagnosis = trpc.diagnosis.create.useMutation({
-    onSuccess: async (result) => {
-      setSavedResult(result);
-      await utils.diagnosis.list.invalidate();
-      setLocation("/app");
-    },
-  });
+  const createDiagnosis = trpc.diagnosis.create.useMutation({ onSuccess: async (result) => { setSavedResult(result); await utils.diagnosis.list.invalidate(); setLocation("/app"); } });
+  const updateProgress = trpc.diagnosis.updateProgress.useMutation({ onSuccess: () => utils.diagnosis.list.invalidate() });
 
   const computed = useMemo(() => {
-    const incomeCents = toCents(income);
-    const cashCents = toCents(cash);
-    const availableCents = calculateAvailableCents(incomeCents, cashCents);
-    const ranked = rankDebts(debts.map((debt) => ({
-      label: debt.label,
-      balanceCents: toCents(debt.balance),
-      pressure: debt.pressure,
-    })));
-    return {
-      incomeCents,
-      cashCents,
-      availableCents,
-      totalDebtCents: calculateTotalDebtCents(ranked),
-      ranked,
-      top: ranked[0] ?? { label: "sua primeira dívida", pressure: 0, balanceCents: 0 },
-    };
+    const incomeCents = toCents(income); const cashCents = toCents(cash);
+    const draft = debts.map((debt) => ({ label: debt.label, balanceCents: toCents(debt.balance), pressure: debt.pressure, dueDay: Number(debt.dueDay) || null, interestRateBps: Math.round((Number(debt.interestRate) || 0) * 100), minimumPaymentCents: toCents(debt.minimumPayment) }));
+    const ranked = rankDebts(draft);
+    return { incomeCents, cashCents, availableCents: calculateAvailableCents(incomeCents, cashCents), totalDebtCents: calculateTotalDebtCents(ranked), ranked, top: ranked[0] ?? { label: "sua primeira dívida", pressure: 0, balanceCents: 0, priorityScore: 0 } };
   }, [cash, debts, income]);
 
   const plan = useMemo<PlanItem[]>(() => [
@@ -93,100 +44,40 @@ export default function AppDashboard() {
     { title: "Em 7 dias", text: "Volte ao Radar e compare o que mudou antes de assumir qualquer parcela.", tone: "bg-[#102d3c] text-[#ff957e]" },
   ], [computed.availableCents, computed.top.label]);
 
-  function updateDebt(index: number, key: keyof DebtDraft, value: string | number) {
-    setDebts((current) => current.map((debt, debtIndex) => debtIndex === index ? { ...debt, [key]: value } : debt));
-  }
-
-  function addDebt() {
-    if (debts.length >= 6) return;
-    setDebts((current) => [...current, { label: "Nova conta", balance: "0", pressure: 30 }]);
-  }
-
-  function removeDebt(index: number) {
-    if (debts.length <= 1) return;
-    setDebts((current) => current.filter((_, debtIndex) => debtIndex !== index));
-  }
-
+  function updateDebt(index: number, key: keyof DebtDraft, value: string | number) { setDebts((current) => current.map((debt, i) => i === index ? { ...debt, [key]: value } : debt)); }
+  function addDebt() { if (debts.length < 6) setDebts((current) => [...current, { label: "Nova conta", balance: "0", pressure: 30, dueDay: "", interestRate: "", minimumPayment: "" }]); }
+  function removeDebt(index: number) { if (debts.length > 1) setDebts((current) => current.filter((_, i) => i !== index)); }
   function saveDiagnosis() {
-    createDiagnosis.mutate({
-      incomeCents: computed.incomeCents,
-      cashCents: computed.cashCents,
-      availableCents: computed.availableCents,
-      totalDebtCents: computed.totalDebtCents,
-      topPriority: computed.top.label,
-      planJson: JSON.stringify(plan),
-      debts: computed.ranked.map((debt, index) => ({
-        label: debt.label,
-        balanceCents: debt.balanceCents,
-        pressure: debt.pressure,
-        position: index + 1,
-      })),
-    });
+    createDiagnosis.mutate({ incomeCents: computed.incomeCents, cashCents: computed.cashCents, availableCents: computed.availableCents, totalDebtCents: computed.totalDebtCents, topPriority: computed.top.label, planJson: JSON.stringify(plan), debts: computed.ranked.map((debt, index) => ({ label: debt.label, balanceCents: debt.balanceCents, pressure: debt.pressure, dueDay: debt.dueDay, interestRateBps: debt.interestRateBps, minimumPaymentCents: debt.minimumPaymentCents, position: index + 1 })) });
   }
 
-  if (isNew) {
-    return <NewDiagnosis income={income} cash={cash} debts={debts} computed={computed} plan={plan} updateDebt={updateDebt} setIncome={setIncome} setCash={setCash} addDebt={addDebt} removeDebt={removeDebt} saveDiagnosis={saveDiagnosis} isSaving={createDiagnosis.isPending} error={createDiagnosis.error?.message} />;
+  if (isNew) return <NewDiagnosis income={income} cash={cash} debts={debts} computed={computed} plan={plan} updateDebt={updateDebt} setIncome={setIncome} setCash={setCash} addDebt={addDebt} removeDebt={removeDebt} saveDiagnosis={saveDiagnosis} isSaving={createDiagnosis.isPending} error={createDiagnosis.error?.message} />;
+  const records = diagnoses.data ?? []; const active = savedResult ?? records[0];
+  const activePlan = active ? parsePlan(active.planJson) : plan;
+  const completed = active ? parseCompleted(active.completedPlanJson) : [];
+  function togglePlan(index: number) {
+    if (!active?.id) return;
+    const next = completed.includes(index) ? completed.filter((item: number) => item !== index) : [...completed, index];
+    setSavedResult({ ...active, completedPlanJson: JSON.stringify(next) });
+    updateProgress.mutate({ diagnosisId: active.id, completed: next });
   }
-
-  const records = diagnoses.data ?? [];
-  const active = savedResult ?? records[0];
-
-  return (
-    <div className="mx-auto w-full max-w-[1180px] space-y-7 pb-10">
-      <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
-        <div><p className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#e36c55]">Seu espaço</p><h1 className="mt-2 font-display text-4xl font-extrabold tracking-[-0.07em] text-[#102d3c] md:text-5xl">O próximo passo está aqui.</h1><p className="mt-3 max-w-[560px] text-sm leading-6 text-[#59717a]">Revise seus diagnósticos, acompanhe o plano de sete dias e volte aos números sem se perder.</p></div>
-        <Button onClick={() => setLocation("/app/novo")} className="h-12 rounded-xl bg-[#102d3c] px-5 text-sm font-extrabold text-white hover:bg-[#194a5e]"><Plus size={17} className="mr-2" /> Novo diagnóstico</Button>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Metric icon={<CircleDollarSign size={20} />} label="Disponível para agir" value={active ? money(active.availableCents) : money(computed.availableCents)} tone="coral" />
-        <Metric icon={<BarChart3 size={20} />} label="Maior pressão" value={active?.topPriority ?? computed.top.label} tone="blue" />
-        <Metric icon={<CalendarClock size={20} />} label="Último diagnóstico" value={active ? dateLabel(active.createdAt) : "Ainda não feito"} tone="mint" />
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[1.25fr_.75fr]">
-        <section className="rounded-2xl border border-[#dce6e5] bg-white p-6 shadow-[0_16px_40px_rgba(16,45,60,.06)] sm:p-7">
-          <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#227188]">Plano atual</p><h2 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em] text-[#102d3c]">Não espalhe seu dinheiro.</h2></div><span className="grid size-11 place-items-center rounded-xl bg-[#e9f2f0] text-[#227188]"><Target size={21} /></span></div>
-          <p className="mt-3 text-sm leading-6 text-[#59717a]">A primeira frente sugerida pelo seu diagnóstico é <strong className="text-[#102d3c]">{active?.topPriority ?? computed.top.label}</strong>.</p>
-          <div className="mt-7 space-y-3">{active ? parsePlan(active.planJson).map((item: PlanItem, index: number) => <PlanRow key={`${item.title}-${index}`} {...item} index={index} />) : plan.map((item, index) => <PlanRow key={item.title} {...item} index={index} />)}</div>
-          <Button variant="outline" onClick={() => setLocation("/app/novo")} className="mt-7 h-11 rounded-xl border-[#cfe0dd] bg-white text-xs font-extrabold text-[#227188] hover:bg-[#f3f8f6]">Atualizar meus números <ArrowRight size={15} className="ml-2" /></Button>
-        </section>
-
-        <section className="rounded-2xl bg-[#102d3c] p-6 text-white sm:p-7"><div className="flex items-start justify-between"><div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#ff957e]">Acompanhamento</p><h2 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em]">Sete dias sem decidir no susto.</h2></div><Clock3 className="text-[#ff957e]" size={22} /></div><div className="mt-8 rounded-xl border border-white/10 bg-white/[.06] p-4"><div className="flex items-center justify-between text-xs font-bold text-white/60"><span>Progresso do plano</span><span className="text-[#ff957e]">1 de 3</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full w-1/3 rounded-full bg-[#ff7a61]" /></div><p className="mt-4 text-sm font-bold text-white/85">Ação de hoje</p><p className="mt-1 text-xs leading-5 text-white/55">Separe o dinheiro disponível e abra as perguntas do banco antes de negociar.</p></div><div className="mt-7 flex items-center gap-3 text-xs font-semibold text-white/55"><ShieldCheck size={16} className="text-[#ff957e]" /> Seus diagnósticos ficam ligados à sua conta.</div></section>
-      </div>
-
-      <section className="rounded-2xl border border-[#dce6e5] bg-white p-6 sm:p-7"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#e36c55]">Histórico</p><h2 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em] text-[#102d3c]">Seus diagnósticos salvos</h2></div><FileText className="text-[#9ab0ae]" size={22} /></div>{records.length === 0 ? <EmptyHistory onClick={() => setLocation("/app/novo")} /> : <div className="mt-5 divide-y divide-[#e7edeb]">{records.map((record: any) => <button key={record.id} className="flex w-full items-center justify-between gap-4 py-4 text-left transition-colors hover:bg-[#f8fbf9]" onClick={() => setSavedResult(record)}><span><span className="block text-sm font-extrabold text-[#102d3c]">{record.topPriority}</span><span className="mt-1 block text-xs font-semibold text-[#7a8e92]">{dateLabel(record.createdAt)} · {record.debts?.length ?? 0} contas analisadas</span></span><span className="flex items-center gap-3"><strong className="text-sm text-[#227188]">{money(record.totalDebtCents)}</strong><ChevronRight size={17} className="text-[#a4b5b4]" /></span></button>)}</div>}</section>
-    </div>
-  );
+  return <div className="mx-auto w-full max-w-[1180px] space-y-7 pb-10">
+    <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><p className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#e36c55]">Seu espaço · app</p><h1 className="mt-2 font-display text-4xl font-extrabold tracking-[-0.07em] text-[#102d3c] md:text-5xl">Seu plano, sem se perder.</h1><p className="mt-3 max-w-[560px] text-sm leading-6 text-[#59717a]">Aqui é o produto. Crie um diagnóstico, veja sua prioridade e marque cada ação conforme avançar.</p></div><Button onClick={() => setLocation("/app/novo")} className="h-12 rounded-xl bg-[#102d3c] px-5 text-sm font-extrabold text-white hover:bg-[#194a5e]"><Plus size={17} className="mr-2" /> Novo diagnóstico</Button></div>
+    <div className="grid gap-4 md:grid-cols-3"><Metric icon={<CircleDollarSign size={20} />} label="Disponível para agir" value={active ? money(active.availableCents) : money(computed.availableCents)} tone="coral" /><Metric icon={<BarChart3 size={20} />} label="Maior pressão" value={active?.topPriority ?? computed.top.label} tone="blue" /><Metric icon={<CalendarClock size={20} />} label="Último diagnóstico" value={active ? dateLabel(active.createdAt) : "Ainda não feito"} tone="mint" /></div>
+    <div className="grid gap-5 lg:grid-cols-[1.25fr_.75fr]"><section className="rounded-2xl border border-[#dce6e5] bg-white p-6 shadow-[0_16px_40px_rgba(16,45,60,.06)] sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#227188]">Plano atual</p><h2 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em] text-[#102d3c]">Ações pequenas, ordem clara.</h2></div><span className="grid size-11 place-items-center rounded-xl bg-[#e9f2f0] text-[#227188]"><Target size={21} /></span></div><p className="mt-3 text-sm leading-6 text-[#59717a]">Sua primeira frente é <strong className="text-[#102d3c]">{active?.topPriority ?? computed.top.label}</strong>. Marque o que já foi feito.</p><div className="mt-7 space-y-3">{activePlan.map((item: PlanItem, index: number) => <PlanRow key={`${item.title}-${index}`} {...item} index={index} checked={completed.includes(index)} onToggle={() => togglePlan(index)} />)}</div><Button variant="outline" onClick={() => setLocation("/app/novo")} className="mt-7 h-11 rounded-xl border-[#cfe0dd] bg-white text-xs font-extrabold text-[#227188] hover:bg-[#f3f8f6]">Atualizar meus números <ArrowRight size={15} className="ml-2" /></Button></section>
+      <section className="rounded-2xl bg-[#102d3c] p-6 text-white sm:p-7"><div className="flex items-start justify-between"><div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#ff957e]">Acompanhamento</p><h2 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em]">Você está construindo ritmo.</h2></div><Clock3 className="text-[#ff957e]" size={22} /></div><div className="mt-8 rounded-xl border border-white/10 bg-white/[.06] p-4"><div className="flex items-center justify-between text-xs font-bold text-white/60"><span>Progresso do plano</span><span className="text-[#ff957e]">{completed.length} de {activePlan.length}</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-[#ff7a61] transition-all" style={{ width: `${activePlan.length ? completed.length / activePlan.length * 100 : 0}%` }} /></div><p className="mt-4 text-sm font-bold text-white/85">Próxima ação</p><p className="mt-1 text-xs leading-5 text-white/55">{activePlan.find((_: PlanItem, index: number) => !completed.includes(index))?.text ?? "Plano concluído. Volte em 7 dias para revisar."}</p></div><div className="mt-7 flex items-center gap-3 text-xs font-semibold text-white/55"><ShieldCheck size={16} className="text-[#ff957e]" /> Seus diagnósticos ficam ligados à sua conta.</div></section></div>
+    <section className="rounded-2xl border border-[#dce6e5] bg-white p-6 sm:p-7"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#e36c55]">Histórico</p><h2 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em] text-[#102d3c]">Seus diagnósticos salvos</h2></div><FileText className="text-[#9ab0ae]" size={22} /></div>{records.length === 0 ? <EmptyHistory onClick={() => setLocation("/app/novo")} /> : <div className="mt-5 divide-y divide-[#e7edeb]">{records.map((record: any) => <button key={record.id} className="flex w-full items-center justify-between gap-4 py-4 text-left transition-colors hover:bg-[#f8fbf9]" onClick={() => setSavedResult(record)}><span><span className="block text-sm font-extrabold text-[#102d3c]">{record.topPriority}</span><span className="mt-1 block text-xs font-semibold text-[#7a8e92]">{dateLabel(record.createdAt)} · {record.debts?.length ?? 0} contas analisadas</span></span><strong className="text-sm text-[#227188]">{money(record.totalDebtCents)}</strong></button>)}</div>}</section>
+  </div>;
 }
 
 function NewDiagnosis({ income, cash, debts, computed, plan, updateDebt, setIncome, setCash, addDebt, removeDebt, saveDiagnosis, isSaving, error }: any) {
   const [, setLocation] = useLocation();
-  return <div className="mx-auto w-full max-w-[1180px] pb-10"><div className="mb-7 flex items-start justify-between gap-4"><div><button className="mb-4 flex items-center gap-2 text-xs font-extrabold text-[#227188]" onClick={() => setLocation("/app")}><RotateCcw size={14} /> Voltar ao seu espaço</button><p className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#e36c55]">Novo diagnóstico</p><h1 className="mt-2 font-display text-4xl font-extrabold tracking-[-0.07em] text-[#102d3c] md:text-5xl">Coloque os números na mesa.</h1><p className="mt-3 max-w-[580px] text-sm leading-6 text-[#59717a]">Valores aproximados já funcionam. O objetivo é descobrir o próximo movimento, não preencher uma planilha perfeita.</p></div><span className="hidden size-12 place-items-center rounded-2xl bg-[#ffebe6] text-[#df684f] sm:grid"><ClipboardCheck size={24} /></span></div><div className="grid gap-5 lg:grid-cols-[1.1fr_.9fr]"><section className="rounded-2xl border border-[#dce6e5] bg-white p-6 shadow-[0_16px_40px_rgba(16,45,60,.06)] sm:p-7"><div className="grid gap-4 sm:grid-cols-2"><Field label="Renda mensal" value={income} onChange={setIncome} /><Field label="Dinheiro disponível" value={cash} onChange={setCash} /></div><div className="mt-8 flex items-end justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#227188]">Suas contas</p><p className="mt-1 text-sm text-[#59717a]">Ordene pela pressão que você sente hoje.</p></div><button className="flex items-center gap-1.5 text-xs font-extrabold text-[#227188] disabled:opacity-40" onClick={addDebt} disabled={debts.length >= 6}><Plus size={14} /> Adicionar conta</button></div><div className="mt-5 space-y-3">{debts.map((debt: DebtDraft, index: number) => <div key={`${index}-${debt.label}`} className="rounded-xl border border-[#e2ebe9] bg-[#fbfcfa] p-4"><div className="flex items-center gap-3"><Input value={debt.label} onChange={(event) => updateDebt(index, "label", event.target.value)} className="h-10 flex-1 rounded-lg border-[#dce6e5] text-sm font-bold" aria-label="Nome da dívida" /><button className="grid size-9 place-items-center rounded-lg text-[#a7b8b7] hover:bg-[#ffebe6] hover:text-[#df684f]" onClick={() => removeDebt(index)} aria-label="Remover dívida"><Trash2 size={15} /></button></div><div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1.3fr] sm:items-center"><Field label="Saldo aproximado" value={debt.balance} onChange={(value: string) => updateDebt(index, "balance", value)} compact /><label className="block"><div className="mb-2 flex items-center justify-between text-[11px] font-extrabold text-[#6f8588]"><span>Pressão no seu mês</span><span className="text-[#e36c55]">{debt.pressure}%</span></div><input className="h-2 w-full accent-[#ff7a61]" type="range" min="0" max="100" value={debt.pressure} onChange={(event) => updateDebt(index, "pressure", Number(event.target.value))} /></label></div></div>)}</div></section><aside className="space-y-5"><section className="rounded-2xl bg-[#102d3c] p-6 text-white sm:p-7"><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#ff957e]">Leitura instantânea</p><h2 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em]">Sua primeira frente</h2><div className="mt-6 rounded-xl bg-white/[.08] p-4"><span className="block text-xs font-semibold text-white/55">Prioridade sugerida</span><strong className="mt-1 block font-display text-2xl tracking-[-0.05em] text-[#ff957e]">{computed.top.label}</strong><span className="mt-2 block text-xs font-semibold text-white/55">{computed.top.pressure}% de pressão · {money(computed.top.balanceCents)}</span></div><div className="mt-5 space-y-3 text-sm font-semibold text-white/75"><div className="flex items-center justify-between"><span>Total das dívidas</span><strong className="text-white">{money(computed.totalDebtCents)}</strong></div><div className="flex items-center justify-between"><span>Disponível para agir</span><strong className="text-[#ff957e]">{money(computed.availableCents)}</strong></div></div></section><section className="rounded-2xl border border-[#dce6e5] bg-white p-6"><div className="flex items-center gap-2 text-[#227188]"><Sparkles size={17} /><span className="text-xs font-extrabold uppercase tracking-[0.16em]">Plano de 7 dias</span></div><div className="mt-5 space-y-3">{plan.map((item: PlanItem) => <div key={item.title} className="flex gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-lg text-[11px] font-extrabold ${item.tone}`}>{item.title.slice(0, 1)}</span><p className="text-xs leading-5 text-[#59717a]"><strong className="text-[#102d3c]">{item.title}:</strong> {item.text}</p></div>)}</div><Button onClick={saveDiagnosis} disabled={isSaving || debts.some((debt: DebtDraft) => debt.label.trim().length < 2)} className="mt-6 h-12 w-full rounded-xl bg-[#ff7a61] text-sm font-extrabold text-[#102d3c] hover:bg-[#ff927e]">{isSaving ? "Salvando seu plano..." : "Salvar diagnóstico"} <ArrowRight size={16} className="ml-2" /></Button>{error && <p className="mt-3 text-xs font-semibold text-[#d24f3d]">Não foi possível salvar agora. Tente novamente.</p>}<p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[10px] font-bold text-[#8b9b9d]"><ShieldCheck size={12} /> Seus números ficam ligados à sua conta.</p></section></aside></div></div>;
+  return <div className="mx-auto w-full max-w-[1180px] pb-10"><div className="mb-7 flex items-start justify-between gap-4"><div><button className="mb-4 flex items-center gap-2 text-xs font-extrabold text-[#227188]" onClick={() => setLocation("/app")}><RotateCcw size={14} /> Voltar ao seu espaço</button><p className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#e36c55]">Onboarding do app · etapa 1 de 1</p><h1 className="mt-2 font-display text-4xl font-extrabold tracking-[-0.07em] text-[#102d3c] md:text-5xl">Coloque os números na mesa.</h1><p className="mt-3 max-w-[580px] text-sm leading-6 text-[#59717a]">A página de vendas termina quando você entra. Aqui começa seu espaço pessoal: renda, contas e dados que mudam a prioridade.</p></div><span className="hidden size-12 place-items-center rounded-2xl bg-[#ffebe6] text-[#df684f] sm:grid"><ClipboardCheck size={24} /></span></div><div className="grid gap-5 lg:grid-cols-[1.1fr_.9fr]"><section className="rounded-2xl border border-[#dce6e5] bg-white p-6 shadow-[0_16px_40px_rgba(16,45,60,.06)] sm:p-7"><div className="grid gap-4 sm:grid-cols-2"><Field label="Renda mensal" value={income} onChange={setIncome} /><Field label="Dinheiro disponível agora" value={cash} onChange={setCash} /></div><div className="mt-8 flex items-end justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#227188]">Suas contas</p><p className="mt-1 text-sm text-[#59717a]">Quanto mais dados você souber, melhor fica a ordem. Os campos extras são opcionais.</p></div><button className="flex items-center gap-1.5 text-xs font-extrabold text-[#227188] disabled:opacity-40" onClick={addDebt} disabled={debts.length >= 6}><Plus size={14} /> Adicionar conta</button></div><div className="mt-5 space-y-3">{debts.map((debt: DebtDraft, index: number) => <div key={`${index}-${debt.label}`} className="rounded-xl border border-[#e2ebe9] bg-[#fbfcfa] p-4"><div className="flex items-center gap-3"><Input value={debt.label} onChange={(event) => updateDebt(index, "label", event.target.value)} className="h-10 flex-1 rounded-lg border-[#dce6e5] text-sm font-bold" aria-label="Nome da dívida" /><button className="grid size-9 place-items-center rounded-lg text-[#a7b8b7] hover:bg-[#ffebe6] hover:text-[#df684f]" onClick={() => removeDebt(index)} aria-label="Remover dívida"><Trash2 size={15} /></button></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Saldo aproximado" value={debt.balance} onChange={(value: string) => updateDebt(index, "balance", value)} compact /><Field label="Pagamento mínimo" value={debt.minimumPayment} onChange={(value: string) => updateDebt(index, "minimumPayment", value)} compact /></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Juros ao mês (%)" value={debt.interestRate} onChange={(value: string) => updateDebt(index, "interestRate", value)} compact textInput /><Field label="Dia do vencimento" value={debt.dueDay} onChange={(value: string) => updateDebt(index, "dueDay", value.replace(/\D/g, "").slice(0, 2))} compact textInput /></div><label className="mt-4 block"><div className="mb-2 flex items-center justify-between text-[11px] font-extrabold text-[#6f8588]"><span>Pressão no seu mês</span><span className="text-[#e36c55]">{debt.pressure}%</span></div><input className="h-2 w-full accent-[#ff7a61]" type="range" min="0" max="100" value={debt.pressure} onChange={(event) => updateDebt(index, "pressure", Number(event.target.value))} /></label></div>)}</div></section><aside className="space-y-5"><section className="rounded-2xl bg-[#102d3c] p-6 text-white sm:p-7"><p className="text-xs font-extrabold uppercase tracking-[0.16em] text-[#ff957e]">Leitura instantânea</p><h2 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em]">Sua primeira frente</h2><div className="mt-6 rounded-xl bg-white/[.08] p-4"><span className="block text-xs font-semibold text-white/55">Prioridade sugerida</span><strong className="mt-1 block font-display text-2xl tracking-[-0.05em] text-[#ff957e]">{computed.top.label}</strong><span className="mt-2 block text-xs font-semibold text-white/55">Pontuação {computed.top.priorityScore} · {computed.top.pressure}% de pressão</span></div><div className="mt-5 space-y-3 text-sm font-semibold text-white/75"><div className="flex items-center justify-between"><span>Total das dívidas</span><strong className="text-white">{money(computed.totalDebtCents)}</strong></div><div className="flex items-center justify-between"><span>Disponível para agir</span><strong className="text-[#ff957e]">{money(computed.availableCents)}</strong></div></div></section><section className="rounded-2xl border border-[#dce6e5] bg-white p-6"><div className="flex items-center gap-2 text-[#227188]"><Sparkles size={17} /><span className="text-xs font-extrabold uppercase tracking-[0.16em]">Plano de 7 dias</span></div><div className="mt-5 space-y-3">{plan.map((item: PlanItem) => <div key={item.title} className="flex gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-lg text-[11px] font-extrabold ${item.tone}`}>{item.title.slice(0, 1)}</span><p className="text-xs leading-5 text-[#59717a]"><strong className="text-[#102d3c]">{item.title}:</strong> {item.text}</p></div>)}</div><Button onClick={saveDiagnosis} disabled={isSaving || debts.some((debt: DebtDraft) => debt.label.trim().length < 2)} className="mt-6 h-12 w-full rounded-xl bg-[#ff7a61] text-sm font-extrabold text-[#102d3c] hover:bg-[#ff927e]">{isSaving ? "Salvando seu plano..." : "Salvar e abrir meu espaço"} <ArrowRight size={16} className="ml-2" /></Button>{error && <p className="mt-3 text-xs font-semibold text-[#d24f3d]">Não foi possível salvar agora. Tente novamente.</p>}<p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[10px] font-bold text-[#8b9b9d]"><ShieldCheck size={12} /> Seus números ficam ligados à sua conta.</p></section></aside></div></div>;
 }
 
-function Field({ label, value, onChange, compact = false }: { label: string; value: string; onChange: (value: string) => void; compact?: boolean }) {
-  return <label className="block"><span className="mb-2 block text-xs font-extrabold text-[#6f8588]">{label}</span><div className="relative"><span className="absolute left-3 top-2.5 text-xs font-bold text-[#9aacab]">R$</span><Input value={value} onChange={(event) => onChange(event.target.value)} className={`${compact ? "h-10" : "h-11"} rounded-lg border-[#dce6e5] pl-9 text-sm font-bold text-[#102d3c]`} inputMode="numeric" /></div></label>;
-}
-
-function Metric({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone: "coral" | "blue" | "mint" }) {
-  const styles = { coral: "bg-[#ffebe6] text-[#df684f]", blue: "bg-[#e8f2f5] text-[#227188]", mint: "bg-[#e9f2f0] text-[#236c57]" };
-  return <div className="rounded-2xl border border-[#dce6e5] bg-white p-5 shadow-[0_12px_30px_rgba(16,45,60,.04)]"><span className={`grid size-10 place-items-center rounded-xl ${styles[tone]}`}>{icon}</span><span className="mt-4 block text-xs font-extrabold uppercase tracking-[0.12em] text-[#7a8e92]">{label}</span><strong className="mt-1 block truncate font-display text-2xl font-extrabold tracking-[-0.05em] text-[#102d3c]">{value}</strong></div>;
-}
-
-function PlanRow({ title, text, tone, index }: PlanItem & { index: number }) {
-  return <div className="flex items-start gap-3 rounded-xl border border-[#e7edeb] bg-[#fbfcfa] p-4"><span className={`grid size-9 shrink-0 place-items-center rounded-lg text-xs font-extrabold ${tone}`}>{index + 1}</span><div><strong className="block text-sm font-extrabold text-[#102d3c]">{title}</strong><p className="mt-1 text-xs leading-5 text-[#6b8084]">{text}</p></div><Check className="ml-auto mt-1 shrink-0 text-[#59a483]" size={16} /></div>;
-}
-
-function EmptyHistory({ onClick }: { onClick: () => void }) {
-  return <div className="mt-6 rounded-xl border border-dashed border-[#c9dbd7] bg-[#fbfcfa] p-7 text-center"><span className="mx-auto grid size-11 place-items-center rounded-xl bg-[#e9f2f0] text-[#227188]"><FileText size={19} /></span><h3 className="mt-4 font-display text-lg font-extrabold text-[#102d3c]">Seu histórico começa aqui.</h3><p className="mx-auto mt-2 max-w-[360px] text-xs leading-5 text-[#7a8e92]">Faça o primeiro diagnóstico para guardar sua ordem de pressão e o plano de sete dias.</p><Button onClick={onClick} variant="outline" className="mt-5 h-10 rounded-lg border-[#cfe0dd] text-xs font-extrabold text-[#227188]">Criar meu primeiro diagnóstico</Button></div>;
-}
-
-function parsePlan(value: string): PlanItem[] {
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+function Field({ label, value, onChange, compact = false, textInput = false }: { label: string; value: string; onChange: (value: string) => void; compact?: boolean; textInput?: boolean }) { return <label className="block"><span className="mb-2 block text-xs font-extrabold text-[#6f8588]">{label}</span><div className="relative">{!textInput && <span className="absolute left-3 top-2.5 text-xs font-bold text-[#9aacab]">R$</span>}<Input value={value} onChange={(event) => onChange(event.target.value)} className={`${compact ? "h-10" : "h-11"} rounded-lg border-[#dce6e5] ${textInput ? "pl-3" : "pl-9"} text-sm font-bold text-[#102d3c]`} inputMode={textInput ? "decimal" : "numeric"} /></div></label>; }
+function Metric({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone: "coral" | "blue" | "mint" }) { const styles = { coral: "bg-[#ffebe6] text-[#df684f]", blue: "bg-[#e8f2f5] text-[#227188]", mint: "bg-[#e9f2f0] text-[#236c57]" }; return <div className="rounded-2xl border border-[#dce6e5] bg-white p-5 shadow-[0_12px_30px_rgba(16,45,60,.04)]"><span className={`grid size-10 place-items-center rounded-xl ${styles[tone]}`}>{icon}</span><span className="mt-4 block text-xs font-extrabold uppercase tracking-[0.12em] text-[#7a8e92]">{label}</span><strong className="mt-1 block truncate font-display text-2xl font-extrabold tracking-[-0.05em] text-[#102d3c]">{value}</strong></div>; }
+function PlanRow({ title, text, tone, index, checked, onToggle }: PlanItem & { index: number; checked: boolean; onToggle: () => void }) { return <button onClick={onToggle} className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors ${checked ? "border-[#a9d6c7] bg-[#eef9f4]" : "border-[#e7edeb] bg-[#fbfcfa] hover:bg-[#f3f8f6]"}`}><span className={`grid size-9 shrink-0 place-items-center rounded-lg text-xs font-extrabold ${tone}`}>{checked ? <Check size={16} /> : index + 1}</span><div><strong className={`block text-sm font-extrabold ${checked ? "text-[#236c57] line-through" : "text-[#102d3c]"}`}>{title}</strong><p className="mt-1 text-xs leading-5 text-[#6b8084]">{text}</p></div></button>; }
+function EmptyHistory({ onClick }: { onClick: () => void }) { return <div className="mt-6 rounded-xl border border-dashed border-[#c9dbd7] bg-[#fbfcfa] p-7 text-center"><span className="mx-auto grid size-11 place-items-center rounded-xl bg-[#e9f2f0] text-[#227188]"><FileText size={19} /></span><h3 className="mt-4 font-display text-lg font-extrabold text-[#102d3c]">Seu histórico começa aqui.</h3><p className="mx-auto mt-2 max-w-[360px] text-xs leading-5 text-[#7a8e92]">Faça o primeiro diagnóstico para guardar sua ordem de pressão e o plano de sete dias.</p><Button onClick={onClick} variant="outline" className="mt-5 h-10 rounded-lg border-[#cfe0dd] text-xs font-extrabold text-[#227188]">Criar meu primeiro diagnóstico</Button></div>; }
+function parsePlan(value: string): PlanItem[] { try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
+function parseCompleted(value: string | null | undefined): number[] { try { const parsed = JSON.parse(value || "[]"); return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
